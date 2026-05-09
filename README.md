@@ -1112,6 +1112,53 @@ The label shown on each permission checkbox is derived automatically based on ty
 | Widgets | `Widget::getHeading()` or humanized class name |
 | Custom | Translation file or permission key |
 
+### 12. Content Tabs (Edit / View pages)
+
+By default the View page renders the role infolist on top, and the Users relation manager underneath. Combine them into a tabbed layout where the page content sits beside the relation manager tabs:
+
+```php
+FilamentGuardianPlugin::make()
+    ->combineRelationManagerTabsWithContent()        // shortcut: enables on BOTH pages
+    ->contentTabLabel('Settings')                    // override the content tab label
+    ->contentTabIcon(Heroicon::OutlinedCog6Tooth)    // icon for the content tab
+    ->contentTabPosition(ContentTabPosition::After)  // place after the relation tabs
+```
+
+Need different behavior on each page? Use the per-page setters — they override the shortcut:
+
+```php
+FilamentGuardianPlugin::make()
+    ->combineRelationManagerTabsWithContentOnView()        // tabbed layout on View only
+    ->combineRelationManagerTabsWithContentOnEdit(false)   // keep Edit form-only
+```
+
+`contentTabPosition()` accepts the `ContentTabPosition` enum or the strings `'before'` / `'after'`. Filament's default places the content tab before the relation tabs.
+
+Or via config:
+
+```php
+// config/filament-guardian.php
+'role_resource' => [
+    'content_tabs' => [
+        'combine_relation_manager_tabs' => false,         // default for both pages
+        'combine_relation_manager_tabs_on_edit' => null,  // null = inherit default
+        'combine_relation_manager_tabs_on_view' => true,  // override per page
+        'label' => 'Settings',
+        'icon' => 'heroicon-o-cog-6-tooth',
+        'position' => 'after',
+    ],
+],
+```
+
+Resolution order for the combine flag (most specific wins, fluent over config within each tier):
+
+1. Per-page fluent setter — `combineRelationManagerTabsWithContentOnEdit/OnView`
+2. Global fluent setter — `combineRelationManagerTabsWithContent`
+3. Per-page config — `combine_relation_manager_tabs_on_edit/_on_view`
+4. Global config — `combine_relation_manager_tabs` (default `false`)
+
+> **Note:** the package hides relation managers on the Edit page by default. Enabling combine on Edit (via the shortcut or the on-edit setter) automatically opts in the resource's relation managers there too, so the form sits beside the relation tabs. Without it, Edit stays form-only.
+
 ---
 
 All fluent API methods throughout this section accept closures for dynamic values.

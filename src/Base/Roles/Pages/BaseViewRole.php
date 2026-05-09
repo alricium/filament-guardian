@@ -9,11 +9,20 @@ use Filament\Actions\ActionGroup;
 use Filament\Actions\EditAction;
 use Filament\Resources\Pages\ViewRecord;
 use Spatie\Permission\Contracts\Role;
+use Waguilar\FilamentGuardian\Base\Roles\Pages\Concerns\HasGuardianContentTabs;
 use Waguilar\FilamentGuardian\Facades\Guardian;
 
 /** @method Role getRecord() */
 abstract class BaseViewRole extends ViewRecord
 {
+    use HasGuardianContentTabs;
+
+    public function hasCombinedRelationManagerTabsWithContent(): bool
+    {
+        return static::guardianPlugin()?->shouldCombineRelationManagerTabsWithContentOnView()
+            ?? parent::hasCombinedRelationManagerTabsWithContent();
+    }
+
     /**
      * @return array<Action | ActionGroup>
      */

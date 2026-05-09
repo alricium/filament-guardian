@@ -11,9 +11,13 @@ use Filament\Actions\ViewAction;
 use Filament\Facades\Filament;
 use Filament\Notifications\Notification;
 use Filament\Resources\Pages\EditRecord;
+use Filament\Resources\RelationManagers\RelationGroup;
+use Filament\Resources\RelationManagers\RelationManager;
+use Filament\Resources\RelationManagers\RelationManagerConfiguration;
 use Illuminate\Support\Collection;
 use RuntimeException;
 use Spatie\Permission\Contracts\Role;
+use Waguilar\FilamentGuardian\Base\Roles\Pages\Concerns\HasGuardianContentTabs;
 use Waguilar\FilamentGuardian\Concerns\SyncsPermissions;
 use Waguilar\FilamentGuardian\Facades\Guardian;
 use Waguilar\FilamentGuardian\FilamentGuardianPlugin;
@@ -21,6 +25,7 @@ use Waguilar\FilamentGuardian\Support\PermissionResolver;
 
 abstract class BaseEditRole extends EditRecord
 {
+    use HasGuardianContentTabs;
     use SyncsPermissions;
 
     public function mount(int | string $record): void
@@ -57,13 +62,26 @@ abstract class BaseEditRole extends EditRecord
         return $url;
     }
 
+    public function hasCombinedRelationManagerTabsWithContent(): bool
+    {
+        return static::guardianPlugin()?->shouldCombineRelationManagerTabsWithContentOnEdit()
+            ?? parent::hasCombinedRelationManagerTabsWithContent();
+    }
+
     /**
-     * Hide relation managers on edit page - only show on view page.
+     * Hide relation managers on the edit page by default. When the plugin
+     * (or config) opts into combining relation manager tabs with the content
+     * tab on Edit, fall through to the resource's relations so the combined
+     * layout works there too.
      *
-     * @return array<class-string>
+     * @return array<class-string<RelationManager> | RelationGroup | RelationManagerConfiguration>
      */
     public function getRelationManagers(): array
     {
+        if (static::guardianPlugin()?->shouldCombineRelationManagerTabsWithContentOnEdit() ?? false) {
+            return parent::getRelationManagers();
+        }
+
         return [];
     }
 

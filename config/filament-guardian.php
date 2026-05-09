@@ -339,5 +339,33 @@ return [
             'icon' => false,      // Show resource navigation icon in sections
         ],
 
+        /*
+        |--------------------------------------------------------------------------
+        | Content Tabs (Edit / View pages)
+        |--------------------------------------------------------------------------
+        |
+        | Combine the relation manager tabs with the page content (form on the
+        | Edit page, infolist on the View page). When enabled, the page content
+        | is rendered as its own tab alongside the relation managers.
+        |
+        | - combine_relation_manager_tabs: default for both pages.
+        | - combine_relation_manager_tabs_on_edit / _on_view: per-page overrides.
+        |   Leave null to fall back to the shared default above.
+        | - label: override the content tab label (null = Filament default).
+        | - icon:  icon for the content tab (null = no icon).
+        | - position: 'before' or 'after' (null = Filament default, which is
+        |   "before" the relation manager tabs).
+        |
+        */
+
+        'content_tabs' => [
+            'combine_relation_manager_tabs' => false,
+            'combine_relation_manager_tabs_on_edit' => null,
+            'combine_relation_manager_tabs_on_view' => null,
+            'label' => null,
+            'icon' => null,
+            'position' => null,
+        ],
+
     ],
 ];

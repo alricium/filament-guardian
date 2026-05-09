@@ -7,6 +7,7 @@ namespace Waguilar\FilamentGuardian;
 use Filament\Contracts\Plugin;
 use Filament\Panel;
 use Spatie\Permission\PermissionRegistrar;
+use Waguilar\FilamentGuardian\Concerns\HasContentTabs;
 use Waguilar\FilamentGuardian\Concerns\HasNavigation;
 use Waguilar\FilamentGuardian\Concerns\HasPermissionTabs;
 use Waguilar\FilamentGuardian\Concerns\HasSectionConfiguration;
@@ -16,6 +17,7 @@ use Waguilar\FilamentGuardian\Support\PermissionKeyBuilder;
 
 class FilamentGuardianPlugin implements Plugin
 {
+    use HasContentTabs;
     use HasNavigation;
     use HasPermissionTabs;
     use HasSectionConfiguration;
