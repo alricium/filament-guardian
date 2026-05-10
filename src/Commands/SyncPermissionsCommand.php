@@ -19,7 +19,8 @@ class SyncPermissionsCommand extends Command
 
     /** @var string */
     public $signature = 'guardian:sync
-        {--panel=* : Specific panel IDs to sync (syncs all if not specified)}';
+        {--panel=* : Specific panel IDs to sync (syncs all if not specified)}
+        {--no-relation-managers : Skip auto-discovered relation managers}';
 
     /** @var string */
     public $description = 'Sync permissions for all Filament panels';
@@ -87,6 +88,7 @@ class SyncPermissionsCommand extends Command
         $this->stats[$guard] ??= ['created' => 0, 'existing' => 0];
 
         $this->syncResources($panel, $guard);
+        $this->syncRelationManagers($panel, $guard);
         $this->syncPages($panel, $guard);
         $this->syncWidgets($panel, $guard);
 
@@ -120,6 +122,45 @@ class SyncPermissionsCommand extends Command
         $this->components->twoColumnDetail(
             '  Resources',
             '<fg=gray>' . count($resources) . ' resource(s), ' . count($resources) * count($this->getResourceMethods($resources[0] ?? '')) . ' permission(s)</>'
+        );
+    }
+
+    protected function syncRelationManagers(Panel $panel, string $guard): void
+    {
+        if ($this->option('no-relation-managers')) {
+            return;
+        }
+
+        $entries = $this->getRelationManagers($panel);
+
+        if ($entries === []) {
+            return;
+        }
+
+        $totalPermissions = 0;
+
+        foreach ($entries as $entry) {
+            $rmClass = $entry['class'];
+            $modelClass = $entry['related_model'];
+            $subject = $this->getRelationManagerSubject($rmClass, $modelClass);
+            $methods = $this->getRelationManagerMethods($rmClass);
+            $permissionKeys = $this->buildResourcePermissionKeys($subject, $methods);
+
+            foreach ($permissionKeys as $key) {
+                $result = $this->createPermission($key, $guard);
+                $this->recordStat($guard, $result['created']);
+                $totalPermissions++;
+
+                if ($this->output->isVerbose()) {
+                    $status = $result['created'] ? '<fg=green>Created</>' : '<fg=gray>Exists</>';
+                    $this->components->twoColumnDetail("  {$key}", $status);
+                }
+            }
+        }
+
+        $this->components->twoColumnDetail(
+            '  Relation Managers',
+            '<fg=gray>' . count($entries) . ' relation manager(s), ' . $totalPermissions . ' permission(s)</>'
         );
     }
 

@@ -7,13 +7,16 @@ namespace Waguilar\FilamentGuardian\Support;
 use BackedEnum;
 use Filament\Pages\Page;
 use Filament\Panel;
+use Filament\Resources\RelationManagers\RelationManager;
 use Filament\Resources\Resource;
 use Filament\Widgets\WidgetConfiguration;
 use Illuminate\Contracts\Support\Htmlable;
 use Illuminate\Support\Collection;
+use Illuminate\Support\Str;
 use ReflectionMethod;
 use ReflectionProperty;
 use Spatie\Permission\Models\Permission;
+use Throwable;
 use Waguilar\FilamentGuardian\Contracts\PermissionKeyBuilder as PermissionKeyBuilderContract;
 
 final class PermissionResolver
@@ -43,6 +46,13 @@ final class PermissionResolver
      * @var Collection<string, string>|null
      */
     private ?Collection $widgetLabelsCache = null;
+
+    /**
+     * Cache of relation-manager-derived subject metadata, keyed by formatted subject.
+     *
+     * @var array<string, array{label: string, icon: string|null}>|null
+     */
+    private ?array $relationManagerSubjects = null;
 
     public function __construct(
         private readonly Panel $panel,
@@ -140,15 +150,19 @@ final class PermissionResolver
      */
     public function getResourceLabels(): Collection
     {
-        $subjects = $this->getResourceSubjects();
+        /** @var array<string, string> $labels */
+        $labels = array_map(
+            fn (string $resourceClass): string => $resourceClass::getPluralModelLabel(),
+            $this->getResourceSubjects(),
+        );
 
-        /** @var Collection<string, string> $labels */
-        $labels = collect($subjects)->map(function (string $resourceClass): string {
-            /** @var class-string<resource> $resourceClass */
-            return $resourceClass::getPluralModelLabel();
-        });
+        foreach ($this->getRelationManagerSubjects() as $subject => $meta) {
+            if (! isset($labels[$subject])) {
+                $labels[$subject] = $meta['label'];
+            }
+        }
 
-        return $labels;
+        return new Collection($labels);
     }
 
     /**
@@ -156,11 +170,11 @@ final class PermissionResolver
      */
     public function getResourceIcons(): Collection
     {
-        $subjects = $this->getResourceSubjects();
+        $resourceSubjects = $this->getResourceSubjects();
 
         /** @var array<string, string|null> $icons */
         $icons = [];
-        foreach ($subjects as $subject => $resourceClass) {
+        foreach ($resourceSubjects as $subject => $resourceClass) {
             /** @var class-string<resource> $resourceClass */
             $icon = $resourceClass::getNavigationIcon();
 
@@ -170,6 +184,12 @@ final class PermissionResolver
                 $icons[$subject] = null;
             } else {
                 $icons[$subject] = $icon;
+            }
+        }
+
+        foreach ($this->getRelationManagerSubjects() as $subject => $meta) {
+            if (! array_key_exists($subject, $icons)) {
+                $icons[$subject] = $meta['icon'];
             }
         }
 
@@ -295,6 +315,7 @@ final class PermissionResolver
         $custom = collect();
 
         $resourceSubjects = $this->getResourceSubjects();
+        $rmSubjects = $this->getRelationManagerSubjects();
         $pageSubjects = $this->getPageSubjects();
         $widgetSubjects = $this->getWidgetSubjects();
 
@@ -318,8 +339,8 @@ final class PermissionResolver
 
             $subject = $parts[1];
 
-            // Check if it matches a resource subject
-            if (isset($resourceSubjects[$subject])) {
+            // Check if it matches a resource or relation-manager-derived subject
+            if (isset($resourceSubjects[$subject]) || isset($rmSubjects[$subject])) {
                 if (! isset($resources[$subject])) {
                     /** @var Collection<int, string> $emptyCollection */
                     $emptyCollection = collect();
@@ -390,6 +411,140 @@ final class PermissionResolver
         }
 
         return $subjects;
+    }
+
+    /**
+     * @return array<string, array{label: string, icon: string|null}>
+     */
+    private function getRelationManagerSubjects(): array
+    {
+        if ($this->relationManagerSubjects !== null) {
+            return $this->relationManagerSubjects;
+        }
+
+        /** @var array<class-string<RelationManager>> $excluded */
+        $excluded = config('filament-guardian.relation_managers.exclude', []);
+
+        /** @var string $subjectType */
+        $subjectType = config('filament-guardian.relation_managers.subject', 'model');
+
+        /** @var array<class-string, array<string, mixed>> $managed */
+        $managed = config('filament-guardian.relation_managers.manage', []);
+
+        /** @var array<class-string<resource>> $resourceExcluded */
+        $resourceExcluded = config('filament-guardian.resources.exclude', []);
+
+        $subjects = [];
+        $resourceModels = [];
+        $seen = [];
+
+        foreach ($this->panel->getResources() as $resourceClass) {
+            if (in_array($resourceClass, $resourceExcluded, true)) {
+                continue;
+            }
+
+            /** @var class-string<resource> $resourceClass */
+            try {
+                /** @var class-string $modelClass */
+                $modelClass = $resourceClass::getModel();
+                if (class_exists($modelClass)) {
+                    $resourceModels[$modelClass] = true;
+                }
+            } catch (Throwable) {
+            }
+        }
+
+        foreach ($this->panel->getResources() as $resourceClass) {
+            if (in_array($resourceClass, $resourceExcluded, true)) {
+                continue;
+            }
+
+            foreach (RelationManagerDiscoverer::collectClasses($resourceClass) as $rmClass) {
+                if (isset($seen[$rmClass]) || in_array($rmClass, $excluded, true)) {
+                    continue;
+                }
+
+                $seen[$rmClass] = true;
+
+                if (! RelationManagerDiscoverer::isEligible($rmClass)) {
+                    continue;
+                }
+
+                $modelClass = RelationManagerDiscoverer::resolveRelatedModel($rmClass, $resourceClass);
+
+                if ($modelClass === null) {
+                    continue;
+                }
+
+                $usesPolicyTrait = RelationManagerPolicyDetector::usesRelationManagerPolicy($rmClass);
+
+                if (! $usesPolicyTrait && isset($resourceModels[$modelClass])) {
+                    continue;
+                }
+
+                $subject = $this->resolveRelationManagerSubject(
+                    $rmClass,
+                    $modelClass,
+                    $managed,
+                    $subjectType,
+                    $usesPolicyTrait,
+                );
+
+                $formattedSubject = $this->keyBuilder->format($subject);
+
+                if (isset($subjects[$formattedSubject])) {
+                    continue;
+                }
+
+                $subjects[$formattedSubject] = [
+                    'label' => $this->resolveRelationManagerLabel($modelClass, $usesPolicyTrait, $subject),
+                    'icon' => null,
+                ];
+            }
+        }
+
+        $this->relationManagerSubjects = $subjects;
+
+        return $subjects;
+    }
+
+    /**
+     * @param  class-string<RelationManager>  $rmClass
+     * @param  class-string  $modelClass
+     * @param  array<class-string, array<string, mixed>>  $managed
+     */
+    private function resolveRelationManagerSubject(
+        string $rmClass,
+        string $modelClass,
+        array $managed,
+        string $subjectType,
+        bool $usesPolicyTrait,
+    ): string {
+        if ($usesPolicyTrait) {
+            return RelationManagerPolicyDetector::getRelationManagerSubject($rmClass);
+        }
+
+        $config = $managed[$rmClass] ?? null;
+
+        if (is_array($config) && isset($config['subject']) && is_string($config['subject'])) {
+            return $config['subject'];
+        }
+
+        return $subjectType === 'class'
+            ? RelationManagerPolicyDetector::getRelationManagerSubject($rmClass)
+            : class_basename($modelClass);
+    }
+
+    /**
+     * @param  class-string  $modelClass
+     */
+    private function resolveRelationManagerLabel(string $modelClass, bool $usesPolicyTrait, string $subject): string
+    {
+        if ($usesPolicyTrait) {
+            return Str::headline(Str::plural($subject));
+        }
+
+        return Str::headline(Str::plural(class_basename($modelClass)));
     }
 
     /**

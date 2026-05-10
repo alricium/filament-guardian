@@ -6,17 +6,20 @@ namespace Waguilar\FilamentGuardian\Commands;
 
 use Filament\Facades\Filament;
 use Filament\Panel;
+use Filament\Resources\RelationManagers\RelationManager;
 use Filament\Resources\Resource;
 use Illuminate\Console\Command;
 use Symfony\Component\Console\Attribute\AsCommand;
+use Waguilar\FilamentGuardian\Commands\Concerns\DiscoversEntities;
 use Waguilar\FilamentGuardian\Commands\Concerns\GeneratesPolicies;
 
 use function Laravel\Prompts\multiselect;
 use function Laravel\Prompts\select;
 
-#[AsCommand(name: 'guardian:policies', description: 'Generate policies for Filament resources')]
+#[AsCommand(name: 'guardian:policies', description: 'Generate policies for Filament resources and relation managers')]
 class GeneratePoliciesCommand extends Command
 {
+    use DiscoversEntities;
     use GeneratesPolicies;
 
     /** @var string */
@@ -25,10 +28,12 @@ class GeneratePoliciesCommand extends Command
         {--all-panels : Generate policies for all panels}
         {--resource= : Generate policy for a specific resource (comma-separated for multiple)}
         {--all-resources : Generate policies for all resources in the panel}
+        {--no-relation-managers : Skip auto-discovered relation managers}
+        {--all-relation-managers : Generate policies for all eligible relation managers}
         {--force : Overwrite existing policies}';
 
     /** @var string */
-    public $description = 'Generate policies for Filament resources';
+    public $description = 'Generate policies for Filament resources and relation managers';
 
     protected int $totalGenerated = 0;
 
@@ -106,9 +111,10 @@ class GeneratePoliciesCommand extends Command
         );
 
         $resources = $this->getResourcesToProcess($panel);
+        $relationManagers = $this->getRelationManagersToProcess($panel);
 
-        if ($resources === []) {
-            $this->components->warn('  No resources found to generate policies for.');
+        if ($resources === [] && $relationManagers === []) {
+            $this->components->warn('  No resources or relation managers found to generate policies for.');
 
             return true;
         }
@@ -138,6 +144,28 @@ class GeneratePoliciesCommand extends Command
             if ($path !== null) {
                 $relativePath = str_replace(base_path() . '/', '', $path);
                 $this->components->twoColumnDetail("  {$resourceClass}", "<fg=green>{$relativePath}</>");
+                $generated++;
+            }
+        }
+
+        foreach ($relationManagers as $entry) {
+            $rmClass = $entry['class'];
+            $modelClass = $entry['related_model'];
+
+            $policyPath = $this->getRelationManagerPolicyPath($rmClass, $modelClass);
+
+            if (file_exists($policyPath) && ! $this->option('force')) {
+                $this->components->twoColumnDetail("  {$rmClass}", '<fg=yellow>Exists (use --force to overwrite)</>');
+                $skipped++;
+
+                continue;
+            }
+
+            $path = $this->generatePolicyForRelationManager($rmClass, $modelClass);
+
+            if ($path !== null) {
+                $relativePath = str_replace(base_path() . '/', '', $path);
+                $this->components->twoColumnDetail("  {$rmClass}", "<fg=green>{$relativePath}</>");
                 $generated++;
             }
         }
@@ -225,5 +253,53 @@ class GeneratePoliciesCommand extends Command
         $excluded = config('filament-guardian.resources.exclude', []);
 
         return in_array($resourceClass, $excluded, true);
+    }
+
+    /**
+     * @return array<class-string<RelationManager>, array{class: class-string<RelationManager>, related_model: class-string, parent_resource: class-string<resource>}>
+     */
+    protected function getRelationManagersToProcess(Panel $panel): array
+    {
+        if ($this->option('no-relation-managers')) {
+            return [];
+        }
+
+        $entries = $this->getRelationManagers($panel);
+
+        if ($entries === []) {
+            return [];
+        }
+
+        if ($this->option('all-relation-managers') || $this->option('all-resources') || $this->option('all-panels')) {
+            return $entries;
+        }
+
+        return $this->promptForRelationManagers($entries);
+    }
+
+    /**
+     * @param  array<class-string<RelationManager>, array{class: class-string<RelationManager>, related_model: class-string, parent_resource: class-string<resource>}>  $entries
+     * @return array<class-string<RelationManager>, array{class: class-string<RelationManager>, related_model: class-string, parent_resource: class-string<resource>}>
+     */
+    protected function promptForRelationManagers(array $entries): array
+    {
+        if ($entries === []) {
+            return [];
+        }
+
+        $options = [];
+
+        foreach ($entries as $rmClass => $entry) {
+            $options[$rmClass] = class_basename($rmClass) . ' → ' . class_basename($entry['related_model']);
+        }
+
+        /** @var array<int, class-string<RelationManager>> $selected */
+        $selected = multiselect(
+            label: 'Which relation managers do you want to generate policies for?',
+            options: $options,
+            hint: 'Use --all-relation-managers to skip this prompt, or --no-relation-managers to skip relation managers entirely',
+        );
+
+        return array_intersect_key($entries, array_flip($selected));
     }
 }

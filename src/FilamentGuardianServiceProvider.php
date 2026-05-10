@@ -31,6 +31,8 @@ use Waguilar\FilamentGuardian\Contracts\PermissionKeyBuilder as PermissionKeyBui
 use Waguilar\FilamentGuardian\Exceptions\SuperAdminProtectedException;
 use Waguilar\FilamentGuardian\Facades\Guardian;
 use Waguilar\FilamentGuardian\Support\PermissionKeyBuilder;
+use Waguilar\FilamentGuardian\Support\RelationManagerDiscoverer;
+use Waguilar\FilamentGuardian\Support\RelationManagerPolicyDetector;
 use Waguilar\FilamentGuardian\Support\ResourcePolicyDetector;
 use Waguilar\FilamentGuardian\Testing\TestsFilamentGuardian;
 
@@ -133,6 +135,7 @@ class FilamentGuardianServiceProvider extends PackageServiceProvider
         $this->registerTenantSetListener();
         $this->registerRoleDefaults();
         $this->registerResourcePolicies();
+        $this->registerRelationManagerPolicies();
     }
 
     protected function registerResourcePolicies(): void
@@ -150,6 +153,36 @@ class FilamentGuardianServiceProvider extends PackageServiceProvider
                 }
 
                 Gate::policy($resourceClass, $policyClass);
+            }
+        }
+    }
+
+    protected function registerRelationManagerPolicies(): void
+    {
+        /** @var array<class-string, true> $seen */
+        $seen = [];
+
+        foreach (Filament::getPanels() as $panel) {
+            foreach ($panel->getResources() as $resourceClass) {
+                foreach (RelationManagerDiscoverer::collectClasses($resourceClass) as $rmClass) {
+                    if (isset($seen[$rmClass])) {
+                        continue;
+                    }
+
+                    $seen[$rmClass] = true;
+
+                    if (! RelationManagerPolicyDetector::usesRelationManagerPolicy($rmClass)) {
+                        continue;
+                    }
+
+                    $policyClass = RelationManagerPolicyDetector::getPolicyClass($rmClass);
+
+                    if (! class_exists($policyClass)) {
+                        continue;
+                    }
+
+                    Gate::policy($rmClass, $policyClass);
+                }
             }
         }
     }

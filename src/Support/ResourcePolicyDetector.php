@@ -37,15 +37,7 @@ final class ResourcePolicyDetector
             : $basename;
     }
 
-    public static function getPolicyFilePath(string $resourceClass): string
-    {
-        /** @var string $basePath */
-        $basePath = config('filament-guardian.policies.path', app_path('Policies'));
-
-        return $basePath . DIRECTORY_SEPARATOR . self::getPolicyClassBasename($resourceClass) . '.php';
-    }
-
-    private static function getPolicyNamespace(): string
+    public static function getPolicyNamespace(): string
     {
         /** @var string $basePath */
         $basePath = config('filament-guardian.policies.path', app_path('Policies'));

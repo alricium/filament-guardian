@@ -4,11 +4,13 @@ declare(strict_types=1);
 
 namespace Waguilar\FilamentGuardian\Commands\Concerns;
 
+use Filament\Resources\RelationManagers\RelationManager;
 use Filament\Resources\Resource;
 use Illuminate\Contracts\Auth\Authenticatable;
 use Illuminate\Support\Str;
 use RuntimeException;
 use Waguilar\FilamentGuardian\Contracts\PermissionKeyBuilder;
+use Waguilar\FilamentGuardian\Support\RelationManagerPolicyDetector;
 use Waguilar\FilamentGuardian\Support\ResourcePolicyDetector;
 
 trait GeneratesPolicies
@@ -27,22 +29,38 @@ trait GeneratesPolicies
         $modelClass = $resourceClass::getModel();
         $policyInfo = $this->getPolicyInfo($resourceClass);
 
-        $stubVariables = $this->buildStubVariables($resourceClass, $modelClass, $policyInfo);
-        $stub = $this->getStubForModel($modelClass);
-        $content = $this->replaceStubVariables($stub, $stubVariables);
+        $stubVariables = $this->buildStubVariablesFor(
+            modelClass: $modelClass,
+            methods: $this->getResourceMethods($resourceClass),
+            subject: $this->getPermissionSubject($resourceClass, $modelClass),
+            authorizationContextClass: $resourceClass,
+            policyInfo: $policyInfo,
+        );
 
-        $directory = dirname($policyInfo['path']);
-        if (! is_dir($directory)) {
-            mkdir($directory, 0755, true);
+        return $this->writePolicyFile($policyInfo, $stubVariables, $modelClass);
+    }
+
+    /**
+     * @param  class-string<RelationManager>  $rmClass
+     * @param  class-string  $modelClass
+     */
+    protected function generatePolicyForRelationManager(string $rmClass, string $modelClass): ?string
+    {
+        if (! class_exists($modelClass)) {
+            throw new RuntimeException("Model class not found: {$modelClass}");
         }
 
-        $result = file_put_contents($policyInfo['path'], $content);
+        $policyInfo = $this->getRelationManagerPolicyInfo($rmClass, $modelClass);
 
-        if ($result === false) {
-            throw new RuntimeException("Failed to write policy file: {$policyInfo['path']}");
-        }
+        $stubVariables = $this->buildStubVariablesFor(
+            modelClass: $modelClass,
+            methods: $this->getRelationManagerMethods($rmClass),
+            subject: $this->getRelationManagerPermissionSubject($rmClass, $modelClass),
+            authorizationContextClass: $rmClass,
+            policyInfo: $policyInfo,
+        );
 
-        return $policyInfo['path'];
+        return $this->writePolicyFile($policyInfo, $stubVariables, $modelClass);
     }
 
     protected function getPolicyPath(string $resourceClass): string
@@ -51,20 +69,19 @@ trait GeneratesPolicies
     }
 
     /**
-     * Get policy path, namespace, and policy class name.
-     *
-     * Following Laravel's convention, all policies are placed directly
-     * in the configured policies directory (flat structure). When a resource
-     * uses HasResourcePolicy, the policy file is named after the resource
-     * (minus the "Resource" suffix); otherwise it's named after the model.
-     *
+     * @param  class-string<RelationManager>  $rmClass
+     * @param  class-string  $modelClass
+     */
+    protected function getRelationManagerPolicyPath(string $rmClass, string $modelClass): string
+    {
+        return $this->getRelationManagerPolicyInfo($rmClass, $modelClass)['path'];
+    }
+
+    /**
      * @return array{path: string, namespace: string, policyClassName: string}
      */
     protected function getPolicyInfo(string $resourceClass): array
     {
-        /** @var string $basePath */
-        $basePath = config('filament-guardian.policies.path', app_path('Policies'));
-
         /** @var class-string<resource> $resourceClass */
         $modelClass = $resourceClass::getModel();
 
@@ -72,68 +89,25 @@ trait GeneratesPolicies
             throw new RuntimeException("Model class not found: {$modelClass}");
         }
 
-        $policyClassName = ResourcePolicyDetector::usesResourcePolicy($resourceClass)
+        $basename = ResourcePolicyDetector::usesResourcePolicy($resourceClass)
             ? ResourcePolicyDetector::getPolicyClassBasename($resourceClass)
             : class_basename($modelClass) . 'Policy';
 
-        return [
-            'path' => $basePath . DIRECTORY_SEPARATOR . $policyClassName . '.php',
-            'namespace' => $this->pathToNamespace($basePath),
-            'policyClassName' => $policyClassName,
-        ];
-    }
-
-    protected function pathToNamespace(string $path): string
-    {
-        $appPath = app_path();
-
-        if (str_starts_with($path, $appPath)) {
-            $relativePath = mb_substr($path, mb_strlen($appPath));
-            $relativePath = ltrim($relativePath, DIRECTORY_SEPARATOR);
-
-            return 'App\\' . str_replace(DIRECTORY_SEPARATOR, '\\', $relativePath);
-        }
-
-        // Fallback: convert full relative path
-        $relativePath = str_replace(base_path() . DIRECTORY_SEPARATOR, '', $path);
-
-        return str_replace(DIRECTORY_SEPARATOR, '\\', $relativePath);
+        return $this->buildPolicyInfo($basename);
     }
 
     /**
-     * @param  array{path: string, namespace: string, policyClassName: string}  $policyInfo
-     * @return array{namespace: string, authModelFqcn: string, authModelName: string, authModelVariable: string, modelFqcn: string, modelName: string, modelVariable: string, modelPolicy: string, methods: string}
+     * @param  class-string<RelationManager>  $rmClass
+     * @param  class-string  $modelClass
+     * @return array{path: string, namespace: string, policyClassName: string}
      */
-    protected function buildStubVariables(string $resourceClass, string $modelClass, array $policyInfo): array
+    protected function getRelationManagerPolicyInfo(string $rmClass, string $modelClass): array
     {
-        $modelName = class_basename($modelClass);
-        $modelVariable = Str::camel($modelName);
-        $authModelInfo = $this->getAuthModelInfo();
-        $permissionBuilder = app(PermissionKeyBuilder::class);
+        $basename = RelationManagerPolicyDetector::usesRelationManagerPolicy($rmClass)
+            ? RelationManagerPolicyDetector::getPolicyClassBasename($rmClass)
+            : class_basename($modelClass) . 'Policy';
 
-        $methodsContent = $this->generateMethodsContent(
-            methods: $this->getResourceMethods($resourceClass),
-            modelClass: $modelClass,
-            modelName: $modelName,
-            modelVariable: $modelVariable,
-            authModelName: $authModelInfo['name'],
-            authModelVariable: $authModelInfo['variable'],
-            permissionBuilder: $permissionBuilder,
-            subject: $this->getPermissionSubject($resourceClass, $modelClass),
-            resourceClass: $resourceClass,
-        );
-
-        return [
-            'namespace' => $policyInfo['namespace'],
-            'authModelFqcn' => $authModelInfo['fqcn'],
-            'authModelName' => $authModelInfo['name'],
-            'authModelVariable' => $authModelInfo['variable'],
-            'modelFqcn' => $modelClass,
-            'modelName' => $modelName,
-            'modelVariable' => $modelVariable,
-            'modelPolicy' => $policyInfo['policyClassName'],
-            'methods' => $methodsContent,
-        ];
+        return $this->buildPolicyInfo($basename);
     }
 
     /**
@@ -173,6 +147,30 @@ trait GeneratesPolicies
         return $methodsContent;
     }
 
+    /**
+     * @param  class-string<RelationManager>  $rmClass
+     * @param  class-string  $modelClass
+     */
+    protected function getRelationManagerPermissionSubject(string $rmClass, string $modelClass): string
+    {
+        if (RelationManagerPolicyDetector::usesRelationManagerPolicy($rmClass)) {
+            return RelationManagerPolicyDetector::getRelationManagerSubject($rmClass);
+        }
+
+        $managed = $this->getManagedRelationManagerConfig($rmClass);
+
+        if (isset($managed['subject']) && is_string($managed['subject'])) {
+            return $managed['subject'];
+        }
+
+        /** @var string $subjectType */
+        $subjectType = config('filament-guardian.relation_managers.subject', 'model');
+
+        return $subjectType === 'class'
+            ? RelationManagerPolicyDetector::getRelationManagerSubject($rmClass)
+            : class_basename($modelClass);
+    }
+
     protected function getPermissionSubject(string $resourceClass, string $modelClass): string
     {
         if (ResourcePolicyDetector::usesResourcePolicy($resourceClass)) {
@@ -194,10 +192,6 @@ trait GeneratesPolicies
     }
 
     /**
-     * Get auth model information for policy generation.
-     *
-     * Uses the generic Laravel AuthUser base class for portability.
-     *
      * @return array{fqcn: string, name: string, variable: string}
      */
     protected function getAuthModelInfo(): array
@@ -250,5 +244,82 @@ trait GeneratesPolicies
         }
 
         return strtr($stub, $replacements);
+    }
+
+    /**
+     * @return array{path: string, namespace: string, policyClassName: string}
+     */
+    private function buildPolicyInfo(string $policyClassName): array
+    {
+        /** @var string $basePath */
+        $basePath = config('filament-guardian.policies.path', app_path('Policies'));
+
+        return [
+            'path' => $basePath . DIRECTORY_SEPARATOR . $policyClassName . '.php',
+            'namespace' => ResourcePolicyDetector::getPolicyNamespace(),
+            'policyClassName' => $policyClassName,
+        ];
+    }
+
+    /**
+     * @param  array<int, string>  $methods
+     * @param  array{path: string, namespace: string, policyClassName: string}  $policyInfo
+     * @return array<string, string>
+     */
+    private function buildStubVariablesFor(
+        string $modelClass,
+        array $methods,
+        string $subject,
+        string $authorizationContextClass,
+        array $policyInfo,
+    ): array {
+        $modelName = class_basename($modelClass);
+        $modelVariable = Str::camel($modelName);
+        $authModelInfo = $this->getAuthModelInfo();
+
+        $methodsContent = $this->generateMethodsContent(
+            methods: $methods,
+            modelClass: $modelClass,
+            modelName: $modelName,
+            modelVariable: $modelVariable,
+            authModelName: $authModelInfo['name'],
+            authModelVariable: $authModelInfo['variable'],
+            permissionBuilder: app(PermissionKeyBuilder::class),
+            subject: $subject,
+            resourceClass: $authorizationContextClass,
+        );
+
+        return [
+            'namespace' => $policyInfo['namespace'],
+            'authModelFqcn' => $authModelInfo['fqcn'],
+            'authModelName' => $authModelInfo['name'],
+            'authModelVariable' => $authModelInfo['variable'],
+            'modelFqcn' => $modelClass,
+            'modelName' => $modelName,
+            'modelVariable' => $modelVariable,
+            'modelPolicy' => $policyInfo['policyClassName'],
+            'methods' => $methodsContent,
+        ];
+    }
+
+    /**
+     * @param  array{path: string, namespace: string, policyClassName: string}  $policyInfo
+     * @param  array<string, string>  $stubVariables
+     */
+    private function writePolicyFile(array $policyInfo, array $stubVariables, string $modelClass): string
+    {
+        $stub = $this->getStubForModel($modelClass);
+        $content = $this->replaceStubVariables($stub, $stubVariables);
+
+        $directory = dirname($policyInfo['path']);
+        if (! is_dir($directory)) {
+            mkdir($directory, 0755, true);
+        }
+
+        if (file_put_contents($policyInfo['path'], $content) === false) {
+            throw new RuntimeException("Failed to write policy file: {$policyInfo['path']}");
+        }
+
+        return $policyInfo['path'];
     }
 }

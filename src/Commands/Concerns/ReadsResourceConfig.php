@@ -7,48 +7,66 @@ namespace Waguilar\FilamentGuardian\Commands\Concerns;
 trait ReadsResourceConfig
 {
     /**
-     * Get the methods/actions for a resource.
-     *
      * @return array<int, string>
      */
     protected function getResourceMethods(string $resourceClass): array
     {
-        /** @var array<int, string> $defaultMethods */
-        $defaultMethods = config('filament-guardian.policies.methods', []);
+        return $this->resolveMethods($this->getManagedResourceConfig($resourceClass));
+    }
 
-        $resourceConfig = $this->getManagedResourceConfig($resourceClass);
+    /**
+     * @param  class-string  $rmClass
+     * @return array<int, string>
+     */
+    protected function getRelationManagerMethods(string $rmClass): array
+    {
+        return $this->resolveMethods($this->getManagedRelationManagerConfig($rmClass));
+    }
 
-        if ($resourceConfig === null) {
-            return array_values($defaultMethods);
-        }
+    /**
+     * @return array<string, mixed>|null
+     */
+    protected function getManagedResourceConfig(string $resourceClass): ?array
+    {
+        /** @var array<class-string, array<string, mixed>> $managed */
+        $managed = config('filament-guardian.resources.manage', []);
 
-        /** @var array<int, string>|null $resourceMethods */
-        $resourceMethods = $resourceConfig['methods'] ?? null;
+        return $managed[$resourceClass] ?? null;
+    }
 
-        if ($resourceMethods === null) {
-            return array_values($defaultMethods);
+    /**
+     * @param  class-string  $rmClass
+     * @return array<string, mixed>|null
+     */
+    protected function getManagedRelationManagerConfig(string $rmClass): ?array
+    {
+        /** @var array<class-string, array<string, mixed>> $managed */
+        $managed = config('filament-guardian.relation_managers.manage', []);
+
+        return $managed[$rmClass] ?? null;
+    }
+
+    /**
+     * @param  array<string, mixed>|null  $managed
+     * @return array<int, string>
+     */
+    private function resolveMethods(?array $managed): array
+    {
+        /** @var array<int, string> $defaults */
+        $defaults = config('filament-guardian.policies.methods', []);
+
+        /** @var array<int, string>|null $methods */
+        $methods = $managed['methods'] ?? null;
+
+        if ($methods === null) {
+            return array_values($defaults);
         }
 
         /** @var bool $merge */
         $merge = config('filament-guardian.policies.merge', true);
 
-        if ($merge) {
-            return array_values(array_unique(array_merge($defaultMethods, $resourceMethods)));
-        }
-
-        return array_values($resourceMethods);
-    }
-
-    /**
-     * Get the managed resource configuration.
-     *
-     * @return array<string, mixed>|null
-     */
-    protected function getManagedResourceConfig(string $resourceClass): ?array
-    {
-        /** @var array<class-string, array<string, mixed>> $managedResources */
-        $managedResources = config('filament-guardian.resources.manage', []);
-
-        return $managedResources[$resourceClass] ?? null;
+        return $merge
+            ? array_values(array_unique(array_merge($defaults, $methods)))
+            : array_values($methods);
     }
 }

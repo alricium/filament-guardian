@@ -109,6 +109,34 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | Relation Managers
+    |--------------------------------------------------------------------------
+    |
+    | Configure permission generation for Filament relation managers that
+    | aren't backed by a top-level resource. A relation manager is auto-
+    | discovered through each resource's getRelations() method.
+    |
+    | A relation manager is skipped when ANY of these are true:
+    |   - It declares $relatedResource — Filament already routes auth there.
+    |   - It declares $shouldSkipAuthorization = true.
+    |   - Its related model is already bound to a registered Resource.
+    |   - It is listed in 'exclude' below.
+    |
+    | The default subject is the related model's class basename
+    | (e.g. AccountIdentification). Switch to 'class' to use the relation
+    | manager's class basename (minus the RelationManager suffix). Per-RM
+    | overrides go in 'manage' using the relation manager's FQCN as key.
+    |
+    */
+
+    'relation_managers' => [
+        'subject' => 'model', // 'model' or 'class'
+        'manage' => [],
+        'exclude' => [],
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
     | Pages
     |--------------------------------------------------------------------------
     |

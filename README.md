@@ -849,6 +849,109 @@ Generated record-action methods like `update($user, $record)` require the record
 
 **Clusters** are authorization-neutral. Placing a resource inside a cluster doesn't add or change any gate checks.
 
+## Relation Manager Policies
+
+Filament's RelationManagers are first-class authorization subjects: tab visibility goes through `RelationManager::canViewForRecord`, and per-action checks (create / update / delete / view) flow through `getAuthorizationResponse`. Both default to authorizing against the **related model's** policy.
+
+That works the moment your application has a model-bound policy. Without one, projects historically chose between `$shouldSkipAuthorization = true` (no auth) or a hidden "shim" Resource just to make Guardian generate a policy. Neither is great.
+
+Guardian discovers RelationManagers natively. If your relation manager has neither `$relatedResource` nor `$shouldSkipAuthorization`, and the related model isn't already owned by a registered Resource, Guardian treats it like a Resource for policy and permission generation.
+
+### 1. Auto-discovery
+
+When you run `php artisan guardian:policies`, the command walks each registered Resource's `getRelations()` and offers eligible relation managers alongside resources. `php artisan guardian:sync` syncs their permissions automatically, with no extra flag needed.
+
+A relation manager is **skipped** when ANY of these is true:
+
+- `$relatedResource = SomeResource::class` is set — Filament already routes auth through that resource.
+- `$shouldSkipAuthorization = true` is set — explicit opt-out.
+- The related model is already bound to a registered Resource — that Resource's policy wins by precedence.
+- The class appears in `config('filament-guardian.relation_managers.exclude')`.
+
+### 2. Subject derivation
+
+By default, the permission subject is the **related model's class basename**. For an `AccountIdentificationsRelationManager` whose `accountIdentifications()` relation returns `AccountIdentification` records, the generated permissions are `ViewAny:AccountIdentification`, `Update:AccountIdentification`, etc., and the policy file is `App\Policies\AccountIdentificationPolicy`.
+
+Switch to the relation manager's class basename (minus the `RelationManager` suffix) globally:
+
+```php
+// config/filament-guardian.php
+'relation_managers' => [
+    'subject' => 'class', // 'model' (default) or 'class'
+    'manage' => [
+        // \App\Filament\Resources\Accounts\RelationManagers\IdentificationsRelationManager::class => [
+        //     'subject' => 'AccountIdentity',
+        //     'methods' => ['viewAny', 'view', 'create', 'update', 'delete'],
+        // ],
+    ],
+    'exclude' => [
+        // \App\Filament\Resources\Accounts\RelationManagers\AuditLogRelationManager::class,
+    ],
+],
+```
+
+### 3. Opt-in: `HasRelationManagerPolicy`
+
+Use this only when the related model **is** owned by a registered Resource and you want the relation manager to authorize against a separate policy. Without the trait, the precedence rule keeps the Resource's policy authoritative.
+
+```php
+use Filament\Resources\RelationManagers\RelationManager;
+use Waguilar\FilamentGuardian\Concerns\HasRelationManagerPolicy;
+
+class OrderItemsRelationManager extends RelationManager
+{
+    use HasRelationManagerPolicy;
+
+    protected static string $relationship = 'items';
+}
+```
+
+The trait does two things:
+
+- Bypasses the precedence rule, so generation creates `OrderItemsPolicy` (suffix `RelationManager` stripped) keyed on the relation manager class instead of the model.
+- Overrides `canViewForRecord` and `getAuthorizationResponse` to call Gate against `static::class` (the relation manager) rather than the related model — exactly as `HasResourcePolicy` does for resources.
+
+Run `guardian:policies` then `guardian:sync` and the new policy and permissions appear, plus a card on the role form for the relation manager subject.
+
+### 4. What you need to update in your application
+
+Same three pitfalls as the Resource-Based Policies section, with the relation manager class in the role of the resource class.
+
+#### `$relatedResource` on the relation manager
+
+When `$relatedResource` is set, Filament routes auth through that Resource's policy — Guardian's relation manager pipeline doesn't fire, and the Resource section above is the relevant guidance. This section assumes `$relatedResource` is unset.
+
+#### Action authorization
+
+Actions with `->authorize('update')` (the string form) call Laravel's gate directly against the model. Use the default form or a closure:
+
+```php
+EditAction::make();                                         // routes through the relation manager
+EditAction::make()->authorize(fn (Model $record) =>
+    Gate::check('update', [OrderItemsRelationManager::class, $record]));
+EditAction::make()->authorize('update');                    // bypasses the relation manager's policy
+```
+
+#### Hand-written `$user->can(...)` calls
+
+Pass the relation manager class — not the model — when you've opted into `HasRelationManagerPolicy`:
+
+```php
+// Collection actions (viewAny, create, deleteAny, ...)
+$user->can('viewAny', OrderItemsRelationManager::class);
+
+// Record actions — pass the record as the second array element
+$user->can('update', [OrderItemsRelationManager::class, $record]);
+```
+
+For relation managers without the trait, permissions resolve against the model's policy as Laravel normally does — `$user->can('update', $orderItem)` works.
+
+### 5. Out of scope
+
+**Nested resources** (Filament's `parentResource` / `getParentResourceRegistration` mechanism) are real Resources. They're already discovered through `$panel->getResources()` and follow the Resource-Based Policies path.
+
+**Closure-resolved relation managers inside `RelationGroup`** can't be statically discovered without an owner record. Register them as plain class-string entries or as `RelationManagerConfiguration` instances if you want Guardian to see them.
+
 ## Publishing
 
 ### 1. Config
