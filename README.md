@@ -892,6 +892,31 @@ Switch to the relation manager's class basename (minus the `RelationManager` suf
 ],
 ```
 
+#### Section label
+
+The card label shown in the role-management UI defaults to a humanized plural of the related model's class name (e.g. `AccountIdentification` → "Account Identifications"). Override it by either:
+
+- Setting the relation manager's static `$pluralModelLabel` property (Filament's standard label property, still respected in v5):
+
+  ```php
+  class IdentificationsRelationManager extends RelationManager
+  {
+      protected static ?string $pluralModelLabel = 'Identificaciones';
+  }
+  ```
+
+- Adding a `label` entry to the config override:
+
+  ```php
+  'manage' => [
+      \App\Filament\RelationManagers\IdentificationsRelationManager::class => [
+          'label' => 'Identificaciones',
+      ],
+  ],
+  ```
+
+The config entry takes priority. Both produce the same outcome — pick the one that fits where you'd rather declare it.
+
 ### 3. Opt-in: `HasRelationManagerPolicy`
 
 Use this only when the related model **is** owned by a registered Resource and you want the relation manager to authorize against a separate policy. Without the trait, the precedence rule keeps the Resource's policy authoritative.

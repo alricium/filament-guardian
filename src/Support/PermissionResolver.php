@@ -497,7 +497,7 @@ final class PermissionResolver
                 }
 
                 $subjects[$formattedSubject] = [
-                    'label' => $this->resolveRelationManagerLabel($modelClass, $usesPolicyTrait, $subject),
+                    'label' => $this->resolveRelationManagerLabel($rmClass, $modelClass, $managed, $usesPolicyTrait, $subject),
                     'icon' => null,
                 ];
             }
@@ -536,15 +536,57 @@ final class PermissionResolver
     }
 
     /**
+     * @param  class-string<RelationManager>  $rmClass
      * @param  class-string  $modelClass
+     * @param  array<class-string, array<string, mixed>>  $managed
      */
-    private function resolveRelationManagerLabel(string $modelClass, bool $usesPolicyTrait, string $subject): string
-    {
-        if ($usesPolicyTrait) {
-            return Str::headline(Str::plural($subject));
+    private function resolveRelationManagerLabel(
+        string $rmClass,
+        string $modelClass,
+        array $managed,
+        bool $usesPolicyTrait,
+        string $subject,
+    ): string {
+        $config = $managed[$rmClass] ?? null;
+
+        if (is_array($config) && isset($config['label']) && is_string($config['label']) && $config['label'] !== '') {
+            return $config['label'];
         }
 
-        return Str::headline(Str::plural(class_basename($modelClass)));
+        $static = self::readRelationManagerStaticLabel($rmClass);
+
+        if ($static !== null) {
+            return $static;
+        }
+
+        return $usesPolicyTrait
+            ? Str::headline(Str::plural($subject))
+            : Str::headline(Str::plural(class_basename($modelClass)));
+    }
+
+    /**
+     * Reads Filament's deprecated-but-still-respected static label properties
+     * on the relation manager. Returns the first non-empty string found
+     * (pluralModelLabel wins over pluralLabel).
+     *
+     * @param  class-string<RelationManager>  $rmClass
+     */
+    private static function readRelationManagerStaticLabel(string $rmClass): ?string
+    {
+        foreach (['pluralModelLabel', 'pluralLabel'] as $property) {
+            try {
+                $reflection = new ReflectionProperty($rmClass, $property);
+                $value = $reflection->getValue();
+            } catch (Throwable) {
+                continue;
+            }
+
+            if (is_string($value) && $value !== '') {
+                return $value;
+            }
+        }
+
+        return null;
     }
 
     /**
