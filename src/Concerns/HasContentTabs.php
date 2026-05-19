@@ -151,10 +151,10 @@ trait HasContentTabs
         return $configValue;
     }
 
-    public function getContentTabIcon(): string | BackedEnum | Htmlable | null
+    public function getContentTabIcon(): string | BackedEnum | null
     {
         if ($this->contentTabIcon !== null) {
-            /** @var string|BackedEnum|Htmlable|null $result */
+            /** @var string|BackedEnum|null $result */
             $result = $this->evaluate($this->contentTabIcon);
 
             return $result;

@@ -21,6 +21,7 @@ use Orchestra\Testbench\TestCase as Orchestra;
 use RyanChandler\BladeCaptureDirective\BladeCaptureDirectiveServiceProvider;
 use Spatie\Permission\PermissionServiceProvider;
 use Waguilar\FilamentGuardian\FilamentGuardianServiceProvider;
+use Waguilar\FilamentGuardian\Tests\Fixtures\AdminPanelProvider;
 
 class TestCase extends Orchestra
 {
@@ -51,6 +52,7 @@ class TestCase extends Orchestra
             WidgetsServiceProvider::class,
             PermissionServiceProvider::class,
             FilamentGuardianServiceProvider::class,
+            AdminPanelProvider::class,
         ];
 
         sort($providers);

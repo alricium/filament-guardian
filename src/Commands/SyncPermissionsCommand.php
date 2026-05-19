@@ -7,6 +7,7 @@ namespace Waguilar\FilamentGuardian\Commands;
 use Filament\Facades\Filament;
 use Filament\Panel;
 use Illuminate\Console\Command;
+use Spatie\Permission\PermissionRegistrar;
 use Symfony\Component\Console\Attribute\AsCommand;
 use Waguilar\FilamentGuardian\Commands\Concerns\CreatesPermissions;
 use Waguilar\FilamentGuardian\Commands\Concerns\DiscoversEntities;
@@ -20,13 +21,17 @@ class SyncPermissionsCommand extends Command
     /** @var string */
     public $signature = 'guardian:sync
         {--panel=* : Specific panel IDs to sync (syncs all if not specified)}
-        {--no-relation-managers : Skip auto-discovered relation managers}';
+        {--no-relation-managers : Skip auto-discovered relation managers}
+        {--force : Prune stale permissions from the database that are no longer in the config or auto-discovered}';
 
     /** @var string */
     public $description = 'Sync permissions for all Filament panels';
 
     /** @var array<string, array{created: int, existing: int}> */
     protected array $stats = [];
+
+    /** @var array<string, array<string, bool>> */
+    protected array $activePermissions = [];
 
     public function handle(): int
     {
@@ -38,6 +43,11 @@ class SyncPermissionsCommand extends Command
             return self::SUCCESS;
         }
 
+        // Initialize active permissions arrays for the guards to be synced
+        foreach ($panels as $panel) {
+            $this->activePermissions[$panel->getAuthGuard()] = [];
+        }
+
         $this->components->info('Syncing permissions for ' . count($panels) . ' panel(s)...');
         $this->newLine();
 
@@ -46,6 +56,11 @@ class SyncPermissionsCommand extends Command
         }
 
         $this->syncCustomPermissions($panels);
+
+        if ($this->option('force')) {
+            $this->pruneStalePermissions();
+        }
+
         $this->displaySummary();
 
         return self::SUCCESS;
@@ -109,6 +124,7 @@ class SyncPermissionsCommand extends Command
             $permissionKeys = $this->buildResourcePermissionKeys($subject, $methods);
 
             foreach ($permissionKeys as $key) {
+                $this->activePermissions[$guard][$key] = true;
                 $result = $this->createPermission($key, $guard);
                 $this->recordStat($guard, $result['created']);
 
@@ -147,6 +163,7 @@ class SyncPermissionsCommand extends Command
             $permissionKeys = $this->buildResourcePermissionKeys($subject, $methods);
 
             foreach ($permissionKeys as $key) {
+                $this->activePermissions[$guard][$key] = true;
                 $result = $this->createPermission($key, $guard);
                 $this->recordStat($guard, $result['created']);
                 $totalPermissions++;
@@ -177,6 +194,7 @@ class SyncPermissionsCommand extends Command
         foreach ($pages as $pageClass) {
             $subject = $this->getPageSubject($pageClass);
             $key = $this->buildPagePermissionKey($prefix, $subject);
+            $this->activePermissions[$guard][$key] = true;
             $result = $this->createPermission($key, $guard);
             $this->recordStat($guard, $result['created']);
 
@@ -205,6 +223,7 @@ class SyncPermissionsCommand extends Command
         foreach ($widgets as $widgetClass) {
             $subject = $this->getWidgetSubject($widgetClass);
             $key = $this->buildWidgetPermissionKey($prefix, $subject);
+            $this->activePermissions[$guard][$key] = true;
             $result = $this->createPermission($key, $guard);
             $this->recordStat($guard, $result['created']);
 
@@ -244,6 +263,7 @@ class SyncPermissionsCommand extends Command
 
         foreach ($customKeys as $key) {
             foreach ($guards as $guard) {
+                $this->activePermissions[$guard][$key] = true;
                 $result = $this->createPermission($key, $guard);
                 $this->recordStat($guard, $result['created']);
 
@@ -254,6 +274,44 @@ class SyncPermissionsCommand extends Command
             }
         }
 
+        $this->newLine();
+    }
+
+    protected function pruneStalePermissions(): void
+    {
+        $this->components->info('Pruning stale permissions...');
+
+        $permissionModel = $this->getPermissionModel();
+        $prunedCount = 0;
+
+        foreach ($this->activePermissions as $guard => $activeKeys) {
+            $activeList = array_keys($activeKeys);
+
+            // Get all existing permission models for this guard from the database
+            $dbPermissions = $permissionModel::query()
+                ->where('guard_name', $guard)
+                ->get();
+
+            foreach ($dbPermissions as $permission) {
+                if (! in_array($permission->name, $activeList, true)) {
+                    $permission->delete();
+                    $prunedCount++;
+
+                    if ($this->output->isVerbose()) {
+                        $this->components->twoColumnDetail("  {$permission->name} ({$guard})", '<fg=red>Deleted</>');
+                    }
+                }
+            }
+        }
+
+        if ($prunedCount > 0) {
+            app(PermissionRegistrar::class)->forgetCachedPermissions();
+        }
+
+        $this->components->twoColumnDetail(
+            '  Pruned Permissions',
+            "<fg=red>{$prunedCount} deleted</>"
+        );
         $this->newLine();
     }
 

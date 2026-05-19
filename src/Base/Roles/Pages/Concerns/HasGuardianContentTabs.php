@@ -6,7 +6,6 @@ namespace Waguilar\FilamentGuardian\Base\Roles\Pages\Concerns;
 
 use BackedEnum;
 use Filament\Resources\Pages\Enums\ContentTabPosition;
-use Illuminate\Contracts\Support\Htmlable;
 use Waguilar\FilamentGuardian\FilamentGuardianPlugin;
 
 trait HasGuardianContentTabs
@@ -17,7 +16,7 @@ trait HasGuardianContentTabs
             ?? parent::getContentTabLabel();
     }
 
-    public function getContentTabIcon(): string | BackedEnum | Htmlable | null
+    public function getContentTabIcon(): string | BackedEnum | null
     {
         return static::guardianPlugin()?->getContentTabIcon()
             ?? parent::getContentTabIcon();

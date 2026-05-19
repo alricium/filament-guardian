@@ -12,6 +12,7 @@ use Filament\Schemas\Components\Tabs\Tab;
 use Filament\Schemas\Schema;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Support\Collection;
+use Illuminate\Support\Str;
 use Spatie\Permission\Contracts\Role;
 use Waguilar\FilamentGuardian\Facades\Guardian;
 use Waguilar\FilamentGuardian\FilamentGuardianPlugin;
@@ -174,7 +175,7 @@ class BaseRoleInfolist
                 $permissionEntries[] = $entry;
             }
 
-            $section = Section::make($resource['label'])
+            $section = Section::make(Str::ucfirst($resource['label']))
                 ->description(trans_choice('filament-guardian::filament-guardian.roles.messages.permissions_count', $permissionCount, ['count' => $permissionCount]))
                 ->compact()
                 ->collapsible()

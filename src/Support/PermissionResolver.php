@@ -152,13 +152,13 @@ final class PermissionResolver
     {
         /** @var array<string, string> $labels */
         $labels = array_map(
-            fn (string $resourceClass): string => $resourceClass::getPluralModelLabel(),
+            fn (string $resourceClass): string => Str::ucfirst($resourceClass::getPluralModelLabel()),
             $this->getResourceSubjects(),
         );
 
         foreach ($this->getRelationManagerSubjects() as $subject => $meta) {
             if (! isset($labels[$subject])) {
-                $labels[$subject] = $meta['label'];
+                $labels[$subject] = Str::ucfirst($meta['label']);
             }
         }
 

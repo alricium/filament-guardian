@@ -475,7 +475,7 @@ final class PermissionsSchemaBuilder
             ->options($filteredOptions)
             ->bulkToggleable();
 
-        $section = Section::make($label)
+        $section = Section::make(Str::ucfirst($label))
             ->compact()
             ->collapsible()
             ->collapsed(FilamentGuardianPlugin::get()->shouldCollapseResourceSections())
