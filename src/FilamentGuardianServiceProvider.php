@@ -134,8 +134,19 @@ class FilamentGuardianServiceProvider extends PackageServiceProvider
         $this->registerTenantObserver();
         $this->registerTenantSetListener();
         $this->registerRoleDefaults();
+        $this->registerBundledRolePolicy();
         $this->registerResourcePolicies();
         $this->registerRelationManagerPolicies();
+    }
+
+    protected function registerBundledRolePolicy(): void
+    {
+        /** @var class-string $roleClass */
+        $roleClass = app(PermissionRegistrar::class)->getRoleClass();
+
+        $policyClass = ResourcePolicyDetector::getPolicyNamespace() . '\\' . class_basename($roleClass) . 'Policy';
+
+        Gate::policy($roleClass, $policyClass);
     }
 
     protected function registerResourcePolicies(): void
